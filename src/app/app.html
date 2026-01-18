@@ -1,0 +1,23 @@
+<mat-toolbar color="primary">
+  <span>Map Poster Generator</span>
+  <span class="spacer"></span>
+  <a href="https://github.com/originalankur/maptoposter" target="_blank" mat-icon-button>
+    <mat-icon>code</mat-icon>
+  </a>
+</mat-toolbar>
+
+<mat-sidenav-container class="sidenav-container">
+  <mat-sidenav mode="side" opened class="sidenav">
+    <app-poster-controls (generate)="onGenerate($event)"></app-poster-controls>
+
+    <div class="preview-section">
+      <h3>Preview Area</h3>
+      <app-map-preview [lat]="lat" [lon]="lon" [distance]="distance"></app-map-preview>
+    </div>
+  </mat-sidenav>
+
+  <mat-sidenav-content class="content">
+    <app-poster-view [isLoading]="isLoading" [city]="city" [country]="country" [coords]="{lat: lat, lon: lon}"
+      [theme]="theme" [roadsData]="roadsData" [waterData]="waterData" [parksData]="parksData"></app-poster-view>
+  </mat-sidenav-content>
+</mat-sidenav-container>

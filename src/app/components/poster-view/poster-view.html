@@ -1,0 +1,18 @@
+<div class="poster-wrapper">
+    @if (isLoading()) {
+    <div class="loading-overlay">
+        <mat-spinner></mat-spinner>
+        <p>Generating Poster...</p>
+    </div>
+    }
+
+    <div id="poster-container" #posterContainer class="poster-container"></div>
+
+    @if (stage) {
+    <div class="actions">
+        <button mat-raised-button color="accent" (click)="download()">
+            Download PNG (4K)
+        </button>
+    </div>
+    }
+</div>
