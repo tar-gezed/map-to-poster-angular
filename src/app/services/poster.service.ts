@@ -33,45 +33,6 @@ export class PosterService {
         return nodeMap;
     }
 
-    private project(lat: number, lon: number, centerLat: number, centerLon: number, scale: number, width: number, height: number): { x: number, y: number } {
-        // Simple Equirectangular projection for small areas (or Mercator)
-        // Using Mercator for better shape preservation
-        const x = (lon - centerLat) * (Math.PI / 180) * 6378137;
-        // Mercator y
-        const latRad = lat * Math.PI / 180;
-        const y = Math.log(Math.tan(Math.PI / 4 + latRad / 2)) * 6378137;
-
-        // Center projection
-        const centerLatRad = centerLat * Math.PI / 180;
-        const centerY = Math.log(Math.tan(Math.PI / 4 + centerLatRad / 2)) * 6378137;
-        const centerX = (centerLon - centerLat) * (Math.PI / 180) * 6378137; // This is wrong, centerLon should be subtracted from lon
-
-        // Correct logic:
-        // x = (lon - centerLon) * ...
-        const xMeters = (lon - centerLon) * (Math.PI / 180) * 6378137 * Math.cos(centerLat * Math.PI / 180);
-        const yMeters = (lat - centerLat) * 111320; // Simple approximation for now or full Mercator?
-
-        // Let's use standard Web Mercator
-        // x = lon * 20037508.34 / 180
-        // y = log(tan((90 + lat) * PI / 360)) / (PI / 180) * 20037508.34 / 180
-
-        // But we need to fit into width/height based on bbox.
-        // Easier: Normalize lat/lon to 0-1 range based on bbox, then scale to width/height.
-        return { x: 0, y: 0 };
-    }
-
-    // Better approach: Calculate bounds of data, then scale to fit canvas
-    private getBounds(nodes: Map<number, { lat: number, lon: number }>): { minLat: number, maxLat: number, minLon: number, maxLon: number } {
-        let minLat = Infinity, maxLat = -Infinity, minLon = Infinity, maxLon = -Infinity;
-        for (const node of nodes.values()) {
-            if (node.lat < minLat) minLat = node.lat;
-            if (node.lat > maxLat) maxLat = node.lat;
-            if (node.lon < minLon) minLon = node.lon;
-            if (node.lon > maxLon) maxLon = node.lon;
-        }
-        return { minLat, maxLat, minLon, maxLon };
-    }
-
     async generatePoster(
         containerId: string,
         roadsData: OsmData,
@@ -104,27 +65,6 @@ export class PosterService {
             fill: theme.bg
         });
         layer.add(bg);
-
-        // Combine all nodes for bounds calculation
-        const allNodes = new Map<number, { lat: number, lon: number }>();
-        const addNodes = (data: OsmData) => {
-            for (const el of data.elements) {
-                if (el.type === 'node' && el.lat !== undefined && el.lon !== undefined) {
-                    allNodes.set(el.id, { lat: el.lat, lon: el.lon });
-                }
-            }
-        };
-        addNodes(roadsData);
-        addNodes(waterData);
-        addNodes(parksData);
-
-        // Calculate bounds and scale
-        // We want to center on `coords`
-        // But we should use the bounds of the fetched data or the requested bbox?
-        // Let's use the requested bbox logic.
-        // We don't have the bbox here, but we have the data.
-        // Let's calculate bounds from data.
-        const bounds = this.getBounds(allNodes);
 
         // Mercator projection function (Lat/Lon to Meters)
         // Standard Web Mercator (EPSG:3857)
@@ -177,31 +117,18 @@ export class PosterService {
             };
         };
 
-        // Helper to draw ways (Async to prevent UI freeze)
-        const drawWays = async (data: OsmData, type: 'water' | 'park' | 'road') => {
+        // Optimized batch rendering
+        const drawOptimizedLayers = (data: OsmData, type: 'water' | 'park' | 'road') => {
             const nodeMap = this.createNodeMap(data.elements);
+            const ways = data.elements.filter(e => e.type === 'way');
 
-            // Sort roads by hierarchy if road
-            let ways = data.elements.filter(e => e.type === 'way');
+            // 1. Pre-process geometry
+            // Convert everything to array of points [[x,y,x,y], [x,y,x,y]]
+            const paths: number[][] = [];
+            const roadGroups: Map<string, number[][]> = new Map(); // key = "color_width_zIndex", value = array of paths
 
-            if (type === 'road') {
-                const hierarchy = ['motorway', 'trunk', 'primary', 'secondary', 'tertiary', 'residential', 'unclassified'];
-                ways.sort((a, b) => {
-                    const hA = a.tags?.['highway'] || '';
-                    const hB = b.tags?.['highway'] || '';
-                    return hierarchy.indexOf(hA) - hierarchy.indexOf(hB);
-                });
-            }
-
-            // Chunk rendering
-            const BATCH_SIZE = 50;
-            for (let i = 0; i < ways.length; i++) {
-                if (i % BATCH_SIZE === 0) {
-                    await new Promise(resolve => setTimeout(resolve, 0));
-                }
-
-                const way = ways[i];
-                if (!way.nodes) continue;
+            for (const way of ways) {
+                if (!way.nodes || way.nodes.length < 2) continue;
 
                 const points: number[] = [];
                 for (const nodeId of way.nodes) {
@@ -212,62 +139,112 @@ export class PosterService {
                     }
                 }
 
-                if (points.length < 4) continue;
+                if (points.length < 4) continue; // Need at least 2 points (x,y, x,y)
 
-                if (type === 'water') {
-                    const poly = new Konva.Line({
-                        points: points,
-                        fill: theme.water,
-                        closed: true,
-                        strokeEnabled: false
-                    });
-                    layer.add(poly);
-                } else if (type === 'park') {
-                    const poly = new Konva.Line({
-                        points: points,
-                        fill: theme.parks,
-                        closed: true,
-                        strokeEnabled: false
-                    });
-                    layer.add(poly);
-                } else if (type === 'road') {
+                if (type === 'road') {
+                    // Group roads by style
                     const highway = way.tags?.['highway'] || 'unclassified';
                     let color = theme.road_default;
                     let width = 1;
+                    let zIndex = 0; // 0=lowest (drawn first), 4=highest (drawn last)
 
                     if (['motorway', 'motorway_link'].includes(highway)) {
                         color = theme.road_motorway;
                         width = 3;
+                        zIndex = 0;
                     } else if (['trunk', 'trunk_link', 'primary', 'primary_link'].includes(highway)) {
                         color = theme.road_primary;
                         width = 2.5;
+                        zIndex = 1;
                     } else if (['secondary', 'secondary_link'].includes(highway)) {
                         color = theme.road_secondary;
                         width = 2;
+                        zIndex = 2;
                     } else if (['tertiary', 'tertiary_link'].includes(highway)) {
                         color = theme.road_tertiary;
                         width = 1.5;
+                        zIndex = 3;
                     } else if (['residential', 'living_street', 'unclassified'].includes(highway)) {
                         color = theme.road_residential;
                         width = 1;
+                        zIndex = 4;
                     }
 
-                    const line = new Konva.Line({
-                        points: points,
+                    const key = `${color}|${width}|${zIndex}`;
+                    if (!roadGroups.has(key)) {
+                        roadGroups.set(key, []);
+                    }
+                    roadGroups.get(key)!.push(points);
+
+                } else {
+                    // Water / Park
+                    paths.push(points);
+                }
+            }
+
+            // 2. Create Konva Shapes
+            if (type === 'water' || type === 'park') {
+                if (paths.length === 0) return;
+
+                const color = type === 'water' ? theme.water : theme.parks;
+                const shape = new Konva.Shape({
+                    fill: color,
+                    strokeEnabled: false,
+                    listening: false, // Performance optimization
+                    sceneFunc: (context, shape) => {
+                        context.beginPath();
+                        for (const path of paths) {
+                            context.moveTo(path[0], path[1]);
+                            for (let i = 2; i < path.length; i += 2) {
+                                context.lineTo(path[i], path[i + 1]);
+                            }
+                            context.closePath();
+                        }
+                        context.fillStrokeShape(shape);
+                    }
+                });
+                layer.add(shape);
+            } else if (type === 'road') {
+                if (roadGroups.size === 0) return;
+
+                // Sort by zIndex (ascending)
+                const sortedKeys = Array.from(roadGroups.keys()).sort((a, b) => {
+                    const zA = parseInt(a.split('|')[2], 10);
+                    const zB = parseInt(b.split('|')[2], 10);
+                    return zA - zB;
+                });
+
+                for (const key of sortedKeys) {
+                    const [color, widthStr] = key.split('|');
+                    const width = parseFloat(widthStr);
+                    const roadPaths = roadGroups.get(key)!;
+
+                    const shape = new Konva.Shape({
                         stroke: color,
                         strokeWidth: width,
                         lineCap: 'round',
-                        lineJoin: 'round'
+                        lineJoin: 'round',
+                        listening: false,
+                        sceneFunc: (context, shape) => {
+                            context.beginPath();
+                            for (const path of roadPaths) {
+                                context.moveTo(path[0], path[1]);
+                                for (let i = 2; i < path.length; i += 2) {
+                                    context.lineTo(path[i], path[i + 1]);
+                                }
+                            }
+                            context.fillStrokeShape(shape);
+                        }
                     });
-                    layer.add(line);
+                    layer.add(shape);
                 }
             }
         };
 
-        // Draw Layers in order (Sequential await to keep UI responsive)
-        await drawWays(waterData, 'water');
-        await drawWays(parksData, 'park');
-        await drawWays(roadsData, 'road');
+        // Draw Layers in order
+        drawOptimizedLayers(waterData, 'water');
+        drawOptimizedLayers(parksData, 'park');
+        drawOptimizedLayers(roadsData, 'road');
 
         // Gradient Fade
         // Top
