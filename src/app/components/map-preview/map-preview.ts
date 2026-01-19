@@ -69,10 +69,15 @@ export class MapPreviewComponent implements AfterViewInit, OnDestroy {
     this.map.fitBounds(bounds);
   }
 
-  private getBounds(lat: number, lon: number, distMeters: number): L.LatLngBoundsExpression {
+  private getBounds(lat: number, lon: number, distMetersWidth: number): L.LatLngBoundsExpression {
+    const distMetersHeight = distMetersWidth * (4 / 3);
     const earthRadius = 6378137;
-    const latDelta = (distMeters / earthRadius) * (180 / Math.PI);
-    const lonDelta = (distMeters / earthRadius) * (180 / Math.PI) / Math.cos(lat * Math.PI / 180);
+
+    // Width (Longitude)
+    const lonDelta = (distMetersWidth / earthRadius) * (180 / Math.PI) / Math.cos(lat * Math.PI / 180);
+
+    // Height (Latitude)
+    const latDelta = (distMetersHeight / earthRadius) * (180 / Math.PI);
 
     return [
       [lat - latDelta, lon - lonDelta],

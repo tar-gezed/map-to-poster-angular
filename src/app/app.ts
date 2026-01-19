@@ -95,7 +95,10 @@ export class AppComponent {
     this.isLoading.set(true);
     this.showPoster.set(true);
 
-    const bbox = this.overpassService.getBbox(this.lat(), this.lon(), this.distance());
+    // Poster is 3:4 aspect ratio (Portrait)
+    // distance() is the horizontal radius. Vertical radius should be larger.
+    const distY = this.distance() * (4 / 3);
+    const bbox = this.overpassService.getBbox(this.lat(), this.lon(), this.distance(), distY);
 
     forkJoin({
       roads: this.overpassService.fetchRoads(bbox),

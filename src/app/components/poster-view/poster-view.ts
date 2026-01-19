@@ -27,6 +27,8 @@ export class PosterViewComponent implements AfterViewInit, OnDestroy {
 
   posterService = inject(PosterService);
   stage = signal<Konva.Stage | null>(null);
+  loadingProgress = signal<number>(0);
+  loadingMessage = signal<string>('Generating...');
 
   private resizeObserver?: ResizeObserver;
 
@@ -47,22 +49,49 @@ export class PosterViewComponent implements AfterViewInit, OnDestroy {
           currentStage.destroy();
         }
 
-        // Generate new
-        const newStage = await this.posterService.generatePoster(
-          this.posterContainer.nativeElement.id,
-          roads,
-          water,
-          parks,
-          theme,
-          this.city(),
-          this.country(),
-          coords,
-          distance
-        );
-        this.stage.set(newStage);
+        // Reset progress
+        this.loadingProgress.set(0);
+        this.loadingMessage.set('Starting...');
 
-        // Wait a tick for rendering then update scale
-        setTimeout(() => this.updateScale(), 0);
+        // Generate new with progress callback
+        try {
+          const newStage = await this.posterService.generatePoster(
+            this.posterContainer.nativeElement.id,
+            roads,
+            water,
+            parks,
+            theme,
+            this.city(),
+            this.country(),
+            coords,
+            distance,
+            (msg, progress) => {
+              // Update progress signal for the bar
+              this.loadingProgress.set(progress);
+
+              // Log to console only when message changes (major step) to avoid spam
+              // Use untracked to prevent registering this signal as an effect dependency
+              const currentMsg = untracked(() => this.loadingMessage());
+              if (currentMsg !== msg) {
+                console.log(`[Poster Generation] ${msg} (${progress}%)`);
+                this.loadingMessage.set(msg);
+              }
+            }
+          );
+          this.stage.set(newStage);
+
+          // Complete
+          this.loadingProgress.set(100);
+          this.loadingMessage.set('Done');
+
+          // Wait a tick for rendering then update scale
+          setTimeout(() => this.updateScale(), 0);
+
+        } catch (error) {
+          console.error("Poster Generation Error:", error);
+          this.loadingMessage.set('Error generating poster');
+          this.loadingProgress.set(0); // Optional: keep progress bar or reset
+        }
       }
     });
   }

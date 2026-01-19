@@ -3,28 +3,32 @@ import { HttpClient } from '@angular/common/http';
 import { Observable, map } from 'rxjs';
 
 @Injectable({
-    providedIn: 'root'
+  providedIn: 'root'
 })
 export class OverpassService {
-    private http = inject(HttpClient);
-    private baseUrl = 'https://overpass-api.de/api/interpreter';
+  private http = inject(HttpClient);
+  // Keep all URLS for later
+  // private baseUrl = 'https://overpass-api.de/api/interpreter';
+  // private baseUrl = 'https://overpass.private.coffee/api/interpreter';
+  // private baseUrl = 'https://api.openstreetmap.fr/oapi/interpreter';
+  private baseUrl = 'https://overpass.kumi.systems/api/interpreter';
 
-    // Helper to calculate bbox
-    getBbox(lat: number, lon: number, distMeters: number): string {
-        const earthRadius = 6378137;
-        const latDelta = (distMeters / earthRadius) * (180 / Math.PI);
-        const lonDelta = (distMeters / earthRadius) * (180 / Math.PI) / Math.cos(lat * Math.PI / 180);
+  // Helper to calculate bbox
+  getBbox(lat: number, lon: number, distMetersX: number, distMetersY: number): string {
+    const earthRadius = 6378137;
+    const latDelta = (distMetersY / earthRadius) * (180 / Math.PI);
+    const lonDelta = (distMetersX / earthRadius) * (180 / Math.PI) / Math.cos(lat * Math.PI / 180);
 
-        const south = lat - latDelta;
-        const north = lat + latDelta;
-        const west = lon - lonDelta;
-        const east = lon + lonDelta;
+    const south = lat - latDelta;
+    const north = lat + latDelta;
+    const west = lon - lonDelta;
+    const east = lon + lonDelta;
 
-        return `${south},${west},${north},${east}`;
-    }
+    return `${south},${west},${north},${east}`;
+  }
 
-    fetchRoads(bbox: string): Observable<any> {
-        const query = `
+  fetchRoads(bbox: string): Observable<any> {
+    const query = `
       [out:json][timeout:180];
       (
         way["highway"](${bbox});
@@ -33,13 +37,13 @@ export class OverpassService {
       >;
       out skel qt;
     `;
-        return this.http.post(this.baseUrl, `data=${encodeURIComponent(query)}`, {
-            headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
-        });
-    }
+    return this.http.post(this.baseUrl, `data=${encodeURIComponent(query)}`, {
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
+    });
+  }
 
-    fetchWater(bbox: string): Observable<any> {
-        const query = `
+  fetchWater(bbox: string): Observable<any> {
+    const query = `
       [out:json][timeout:180];
       (
         way["natural"="water"](${bbox});
@@ -50,13 +54,13 @@ export class OverpassService {
       >;
       out skel qt;
     `;
-        return this.http.post(this.baseUrl, `data=${encodeURIComponent(query)}`, {
-            headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
-        });
-    }
+    return this.http.post(this.baseUrl, `data=${encodeURIComponent(query)}`, {
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
+    });
+  }
 
-    fetchParks(bbox: string): Observable<any> {
-        const query = `
+  fetchParks(bbox: string): Observable<any> {
+    const query = `
       [out:json][timeout:180];
       (
         way["leisure"="park"](${bbox});
@@ -68,8 +72,8 @@ export class OverpassService {
       >;
       out skel qt;
     `;
-        return this.http.post(this.baseUrl, `data=${encodeURIComponent(query)}`, {
-            headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
-        });
-    }
+    return this.http.post(this.baseUrl, `data=${encodeURIComponent(query)}`, {
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
+    });
+  }
 }

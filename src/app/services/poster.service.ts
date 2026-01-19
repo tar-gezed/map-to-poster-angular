@@ -43,6 +43,7 @@ export class PosterService {
         country: string,
         coords: { lat: number, lon: number },
         distance: number,
+        onProgress?: (message: string, progress: number) => void,
         width: number = 1200, // 1200x1600 is good for preview, export can be higher
         height: number = 1600
     ): Promise<Konva.Stage> {
@@ -83,11 +84,17 @@ export class PosterService {
         // Project center
         const cProj = project(coords.lat, coords.lon);
 
-        // Define viewport in METERS (using distance as radius)
-        const minX = cProj.x - distance;
-        const maxX = cProj.x + distance;
-        const minY = cProj.y - distance;
-        const maxY = cProj.y + distance;
+        // Define viewport in METERS (using distance as horizontal radius)
+        // Adjust for Mercator projection distortion: Scale by 1/cos(lat)
+        // This ensures 'distance' represents ground meters at the current latitude
+        const scaleFactor = 1 / Math.cos(coords.lat * Math.PI / 180);
+        const distMapUnits = distance * scaleFactor;
+
+        const ratio = height / width;
+        const minX = cProj.x - distMapUnits;
+        const maxX = cProj.x + distMapUnits;
+        const minY = cProj.y - (distMapUnits * ratio);
+        const maxY = cProj.y + (distMapUnits * ratio);
 
         const dataWidth = maxX - minX;
         const dataHeight = maxY - minY;
@@ -96,8 +103,6 @@ export class PosterService {
         const minProj = { x: minX, y: minY };
 
         // Scale to fit canvas
-        // Canvas is 1200x1600 (Portrait)
-        // Data is Square
         // We want to FIT WIDTH (filling the width of the poster)
         const scale = width / dataWidth;
 
@@ -117,17 +122,28 @@ export class PosterService {
             };
         };
 
-        // Optimized batch rendering
-        const drawOptimizedLayers = (data: OsmData, type: 'water' | 'park' | 'road') => {
+        // Optimized batch rendering with Async/Chunking
+        const drawOptimizedLayers = async (data: OsmData, type: 'water' | 'park' | 'road', startProgress: number, endProgress: number) => {
             const nodeMap = this.createNodeMap(data.elements);
             const ways = data.elements.filter(e => e.type === 'way');
+            const totalWays = ways.length;
+
+            if (totalWays === 0) return;
 
             // 1. Pre-process geometry
             // Convert everything to array of points [[x,y,x,y], [x,y,x,y]]
             const paths: number[][] = [];
             const roadGroups: Map<string, number[][]> = new Map(); // key = "color_width_zIndex", value = array of paths
 
-            for (const way of ways) {
+            const CHUNK_SIZE = 1000;
+            for (let i = 0; i < totalWays; i++) {
+                if (i % CHUNK_SIZE === 0) {
+                    const currentProgress = startProgress + ((i / totalWays) * (endProgress - startProgress));
+                    if (onProgress) onProgress(`Processing ${type}...`, Math.round(currentProgress));
+                    await new Promise(resolve => setTimeout(resolve, 0)); // Yield to main thread
+                }
+
+                const way = ways[i];
                 if (!way.nodes || way.nodes.length < 2) continue;
 
                 const points: number[] = [];
@@ -204,7 +220,10 @@ export class PosterService {
                     }
                 });
                 layer.add(shape);
-            } else if (type === 'road') {
+            }
+
+            // Draw Roads
+            if (type === 'road') {
                 if (roadGroups.size === 0) return;
 
                 // Sort by zIndex (ascending)
@@ -214,134 +233,171 @@ export class PosterService {
                     return zA - zB;
                 });
 
+                const MAX_PATHS_PER_SHAPE = 2000; // Chunk size to avoid canvas crash
+
                 for (const key of sortedKeys) {
                     const [color, widthStr] = key.split('|');
                     const width = parseFloat(widthStr);
-                    const roadPaths = roadGroups.get(key)!;
+                    const allPaths = roadGroups.get(key)!;
 
-                    const shape = new Konva.Shape({
-                        stroke: color,
-                        strokeWidth: width,
-                        lineCap: 'round',
-                        lineJoin: 'round',
-                        listening: false,
-                        sceneFunc: (context, shape) => {
-                            context.beginPath();
-                            for (const path of roadPaths) {
-                                context.moveTo(path[0], path[1]);
-                                for (let i = 2; i < path.length; i += 2) {
-                                    context.lineTo(path[i], path[i + 1]);
+                    // Split into chunks
+                    for (let i = 0; i < allPaths.length; i += MAX_PATHS_PER_SHAPE) {
+                        const batchPaths = allPaths.slice(i, i + MAX_PATHS_PER_SHAPE);
+
+                        const shape = new Konva.Shape({
+                            stroke: color,
+                            strokeWidth: width,
+                            lineCap: 'round',
+                            lineJoin: 'round',
+                            listening: false,
+                            sceneFunc: (context, shape) => {
+                                context.beginPath();
+                                for (const path of batchPaths) {
+                                    context.moveTo(path[0], path[1]);
+                                    for (let k = 2; k < path.length; k += 2) {
+                                        context.lineTo(path[k], path[k + 1]);
+                                    }
                                 }
+                                context.fillStrokeShape(shape);
                             }
-                            context.fillStrokeShape(shape);
-                        }
-                    });
-                    layer.add(shape);
+                        });
+                        layer.add(shape);
+                    }
                 }
             }
+
+            // Incremental draw
+            layer.batchDraw();
         };
 
         // Draw Layers in order
-        drawOptimizedLayers(waterData, 'water');
-        drawOptimizedLayers(parksData, 'park');
-        drawOptimizedLayers(roadsData, 'road');
+        // Distribute progress: Water (0-20%), Parks (20-40%), Roads (40-90%), Finalize (90-100%)
 
-        // Gradient Fade
-        // Top
-        const gradTop = new Konva.Rect({
-            x: 0,
-            y: 0,
-            width: width,
-            height: height * 0.25,
-            fillLinearGradientStartPoint: { x: 0, y: 0 },
-            fillLinearGradientEndPoint: { x: 0, y: height * 0.25 },
-            fillLinearGradientColorStops: [0, theme.gradient_color, 1, 'rgba(0,0,0,0)']
-        });
-        layer.add(gradTop);
+        // Start background rendering process (Fire and forget, but handle errors)
+        (async () => {
+            try {
+                if (onProgress) onProgress('Water', 10);
+                await drawOptimizedLayers(waterData, 'water', 0, 20);
 
-        // Bottom
-        const gradBottom = new Konva.Rect({
-            x: 0,
-            y: height * 0.75,
-            width: width,
-            height: height * 0.25,
-            fillLinearGradientStartPoint: { x: 0, y: 0 },
-            fillLinearGradientEndPoint: { x: 0, y: height * 0.25 },
-            fillLinearGradientColorStops: [0, 'rgba(0,0,0,0)', 1, theme.gradient_color]
-        });
-        layer.add(gradBottom);
+                // At this point (or even earlier), the stage has dimensions and background.
+                // We can continue rendering other layers.
 
-        // Text
-        // City
-        // Adjust Y to account for text height (Konva draws from top-left)
-        // We want the baseline around 0.86, so subtract font height roughly
-        const cityText = new Konva.Text({
-            x: width / 2,
-            y: height * 0.86 - 50,
-            text: city.toUpperCase().split('').join('  '),
-            fontSize: 60,
-            fontFamily: 'Roboto',
-            fontStyle: 'bold',
-            fill: theme.text,
-            align: 'center'
-        });
-        cityText.offsetX(cityText.width() / 2);
-        layer.add(cityText);
+                if (onProgress) onProgress('Parks', 20);
+                await drawOptimizedLayers(parksData, 'park', 20, 40);
 
-        // Country
-        const countryText = new Konva.Text({
-            x: width / 2,
-            y: height * 0.90, // Keep this, or adjust if needed
-            text: country.toUpperCase(),
-            fontSize: 22,
-            fontFamily: 'Roboto',
-            fontStyle: 'normal',
-            fill: theme.text,
-            align: 'center'
-        });
-        countryText.offsetX(countryText.width() / 2);
-        layer.add(countryText);
+                if (onProgress) onProgress('Roads', 40);
+                await drawOptimizedLayers(roadsData, 'road', 40, 90);
 
-        // Coords
-        const latStr = coords.lat >= 0 ? `${coords.lat.toFixed(4)}° N` : `${Math.abs(coords.lat).toFixed(4)}° S`;
-        const lonStr = coords.lon >= 0 ? `${coords.lon.toFixed(4)}° E` : `${Math.abs(coords.lon).toFixed(4)}° W`;
-        const coordText = new Konva.Text({
-            x: width / 2,
-            y: height * 0.93,
-            text: `${latStr} / ${lonStr}`,
-            fontSize: 14,
-            fontFamily: 'Roboto',
-            fill: theme.text,
-            opacity: 0.7,
-            align: 'center'
-        });
-        coordText.offsetX(coordText.width() / 2);
-        layer.add(coordText);
+                if (onProgress) onProgress('Finalizing', 95);
+                await new Promise(resolve => setTimeout(resolve, 0));
 
-        // Separator Line
-        // Ensure this is below City and above Country
-        const sepLine = new Konva.Line({
-            points: [width * 0.4, height * 0.88, width * 0.6, height * 0.88],
-            stroke: theme.text,
-            strokeWidth: 1
-        });
-        layer.add(sepLine);
+                // Gradient Fade
+                // Top
+                const gradTop = new Konva.Rect({
+                    x: 0,
+                    y: 0,
+                    width: width,
+                    height: height * 0.25,
+                    fillLinearGradientStartPoint: { x: 0, y: 0 },
+                    fillLinearGradientEndPoint: { x: 0, y: height * 0.25 },
+                    fillLinearGradientColorStops: [0, theme.gradient_color, 1, 'rgba(0,0,0,0)']
+                });
+                layer.add(gradTop);
 
-        // Attribution
-        const attrText = new Konva.Text({
-            x: width - 10,
-            y: height - 20,
-            text: '© OpenStreetMap contributors',
-            fontSize: 10,
-            fontFamily: 'Roboto',
-            fill: theme.text,
-            opacity: 0.5,
-            align: 'right'
-        });
-        attrText.offsetX(attrText.width());
-        layer.add(attrText);
+                // Bottom
+                const gradBottom = new Konva.Rect({
+                    x: 0,
+                    y: height * 0.75,
+                    width: width,
+                    height: height * 0.25,
+                    fillLinearGradientStartPoint: { x: 0, y: 0 },
+                    fillLinearGradientEndPoint: { x: 0, y: height * 0.25 },
+                    fillLinearGradientColorStops: [0, 'rgba(0,0,0,0)', 1, theme.gradient_color]
+                });
+                layer.add(gradBottom);
 
-        layer.draw();
+                // Text
+                // City
+                // Adjust Y to account for text height (Konva draws from top-left)
+                // We want the baseline around 0.86, so subtract font height roughly
+                const cityText = new Konva.Text({
+                    x: width / 2,
+                    y: height * 0.86 - 50,
+                    text: city.toUpperCase().split('').join('  '),
+                    fontSize: 60,
+                    fontFamily: 'Roboto',
+                    fontStyle: 'bold',
+                    fill: theme.text,
+                    align: 'center'
+                });
+                cityText.offsetX(cityText.width() / 2);
+                layer.add(cityText);
+
+                // Country
+                const countryText = new Konva.Text({
+                    x: width / 2,
+                    y: height * 0.90, // Keep this, or adjust if needed
+                    text: country.toUpperCase(),
+                    fontSize: 22,
+                    fontFamily: 'Roboto',
+                    fontStyle: 'normal',
+                    fill: theme.text,
+                    align: 'center'
+                });
+                countryText.offsetX(countryText.width() / 2);
+                layer.add(countryText);
+
+                // Coords
+                const latStr = coords.lat >= 0 ? `${coords.lat.toFixed(4)}° N` : `${Math.abs(coords.lat).toFixed(4)}° S`;
+                const lonStr = coords.lon >= 0 ? `${coords.lon.toFixed(4)}° E` : `${Math.abs(coords.lon).toFixed(4)}° W`;
+                const coordText = new Konva.Text({
+                    x: width / 2,
+                    y: height * 0.93,
+                    text: `${latStr} / ${lonStr}`,
+                    fontSize: 14,
+                    fontFamily: 'Roboto',
+                    fill: theme.text,
+                    opacity: 0.7,
+                    align: 'center'
+                });
+                coordText.offsetX(coordText.width() / 2);
+                layer.add(coordText);
+
+                // Separator Line
+                // Ensure this is below City and above Country
+                const sepLine = new Konva.Line({
+                    points: [width * 0.4, height * 0.88, width * 0.6, height * 0.88],
+                    stroke: theme.text,
+                    strokeWidth: 1
+                });
+                layer.add(sepLine);
+
+                // Attribution
+                const attrText = new Konva.Text({
+                    x: width - 10,
+                    y: height - 20,
+                    text: '© OpenStreetMap contributors',
+                    fontSize: 10,
+                    fontFamily: 'Roboto',
+                    fill: theme.text,
+                    opacity: 0.5,
+                    align: 'right'
+                });
+                attrText.offsetX(attrText.width());
+                layer.add(attrText);
+
+                layer.batchDraw();
+
+                if (onProgress) onProgress('Done', 100);
+
+            } catch (err) {
+                console.error("Background rendering error", err);
+                if (onProgress) onProgress('Error', 0);
+            }
+        })();
+
+        // Return stage IMMEDIATELY with just background
+        // This allows the UI to scale it to fit the screen instantly
         return stage;
     }
 }
