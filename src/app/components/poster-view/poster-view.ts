@@ -107,6 +107,18 @@ export class PosterViewComponent implements AfterViewInit, OnDestroy {
 
   ngOnDestroy() {
     this.resizeObserver?.disconnect();
+
+    // Full cleanup of Konva stage to release memory
+    const currentStage = this.stage();
+    if (currentStage) {
+      // Destroy all layers and their children first
+      currentStage.getLayers().forEach(layer => {
+        layer.destroyChildren();
+        layer.destroy();
+      });
+      currentStage.destroy();
+      this.stage.set(null);
+    }
   }
 
   updateScale() {

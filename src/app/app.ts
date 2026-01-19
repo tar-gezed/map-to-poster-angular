@@ -91,7 +91,25 @@ export class AppComponent {
 
   @ViewChild(PosterViewComponent) posterView?: PosterViewComponent;
 
+  /**
+   * Closes the poster view and releases OSM data from memory.
+   * This is critical for memory management with large datasets.
+   */
+  closePoster() {
+    this.showPoster.set(false);
+
+    // Release OSM data from memory - critical for large areas
+    this.roadsData.set(null);
+    this.waterData.set(null);
+    this.parksData.set(null);
+  }
+
   generatePoster() {
+    // Warning for large areas
+    if (this.distance() > 15000) {
+      this.toastService.show('⚠️ Large area selected. This may take a while and use significant memory.', 'info');
+    }
+
     this.isLoading.set(true);
     this.showPoster.set(true);
 
@@ -100,8 +118,11 @@ export class AppComponent {
     const distY = this.distance() * (4 / 3);
     const bbox = this.overpassService.getBbox(this.lat(), this.lon(), this.distance(), distY);
 
+    // For large areas (>10km), exclude minor roads to reduce data and memory usage
+    const excludeMinorRoads = this.distance() > 10000;
+
     forkJoin({
-      roads: this.overpassService.fetchRoads(bbox),
+      roads: this.overpassService.fetchRoads(bbox, excludeMinorRoads),
       water: this.overpassService.fetchWater(bbox),
       parks: this.overpassService.fetchParks(bbox)
     }).pipe(

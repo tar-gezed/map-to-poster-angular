@@ -198,18 +198,29 @@ export class PosterService {
                 }
             }
 
+            // Clear nodeMap after processing - critical for memory
+            nodeMap.clear();
+
             // 2. Create Konva Shapes
             if (type === 'water' || type === 'park') {
                 if (paths.length === 0) return;
 
                 const color = type === 'water' ? theme.water : theme.parks;
+
+                // Store paths in shape attrs to avoid closure retention
+                // We'll render once and then the paths can be garbage collected
+                const pathsCopy = paths.slice(); // Create a copy for the shape
+                paths.length = 0; // Clear original array
+
                 const shape = new Konva.Shape({
                     fill: color,
                     strokeEnabled: false,
                     listening: false, // Performance optimization
-                    sceneFunc: (context, shape) => {
+                    sceneFunc: function (context, shape) {
+                        // Get paths from closure (will be rendered once, then GC'd when shape is destroyed)
+                        const renderPaths = pathsCopy;
                         context.beginPath();
-                        for (const path of paths) {
+                        for (const path of renderPaths) {
                             context.moveTo(path[0], path[1]);
                             for (let i = 2; i < path.length; i += 2) {
                                 context.lineTo(path[i], path[i + 1]);
@@ -242,6 +253,7 @@ export class PosterService {
 
                     // Split into chunks
                     for (let i = 0; i < allPaths.length; i += MAX_PATHS_PER_SHAPE) {
+                        // Create isolated copy for this shape's sceneFunc
                         const batchPaths = allPaths.slice(i, i + MAX_PATHS_PER_SHAPE);
 
                         const shape = new Konva.Shape({
@@ -250,9 +262,11 @@ export class PosterService {
                             lineCap: 'round',
                             lineJoin: 'round',
                             listening: false,
-                            sceneFunc: (context, shape) => {
+                            sceneFunc: function (context, shape) {
+                                // Use isolated batchPaths copy
+                                const renderPaths = batchPaths;
                                 context.beginPath();
-                                for (const path of batchPaths) {
+                                for (const path of renderPaths) {
                                     context.moveTo(path[0], path[1]);
                                     for (let k = 2; k < path.length; k += 2) {
                                         context.lineTo(path[k], path[k + 1]);
@@ -263,7 +277,13 @@ export class PosterService {
                         });
                         layer.add(shape);
                     }
+
+                    // Clear this group's paths after creating shapes
+                    allPaths.length = 0;
                 }
+
+                // Clear the roadGroups map to release memory
+                roadGroups.clear();
             }
 
             // Incremental draw

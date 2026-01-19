@@ -27,11 +27,21 @@ export class OverpassService {
     return `${south},${west},${north},${east}`;
   }
 
-  fetchRoads(bbox: string): Observable<any> {
+  /**
+   * Fetch road data from Overpass API
+   * @param bbox Bounding box string
+   * @param excludeMinorRoads If true, excludes footways, paths, cycleways, steps for better performance on large areas
+   */
+  fetchRoads(bbox: string, excludeMinorRoads: boolean = false): Observable<any> {
+    // For large areas, exclude pedestrian paths to reduce data size significantly
+    const highwayFilter = excludeMinorRoads
+      ? 'way["highway"]["highway"!~"footway|path|cycleway|steps|pedestrian|track|service"](${bbox});'
+      : 'way["highway"](${bbox});';
+
     const query = `
       [out:json][timeout:180];
       (
-        way["highway"](${bbox});
+        ${highwayFilter.replace('${bbox}', bbox)}
       );
       out body;
       >;
