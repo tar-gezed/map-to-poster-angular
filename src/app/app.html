@@ -1,23 +1,89 @@
-<mat-toolbar color="primary">
-  <span>Map Poster Generator</span>
-  <span class="spacer"></span>
-  <a href="https://github.com/originalankur/maptoposter" target="_blank" mat-icon-button>
-    <mat-icon>code</mat-icon>
-  </a>
-</mat-toolbar>
+<div class="app-container">
+  <!-- Map Preview (Background) -->
+  <div class="map-layer">
+    <app-map-preview [lat]="lat()" [lon]="lon()" [distance]="distance()">
+    </app-map-preview>
+  </div>
 
-<mat-sidenav-container class="sidenav-container">
-  <mat-sidenav mode="side" opened class="sidenav">
-    <app-poster-controls (generate)="onGenerate($event)"></app-poster-controls>
+  <!-- Poster View (Overlay when generated) -->
+  @if (showPoster()) {
+  <div class="poster-layer">
+    <div class="poster-preview-area">
+      <app-poster-view [isLoading]="isLoading()" [city]="city()" [country]="country()"
+        [coords]="{lat: lat(), lon: lon()}" [distance]="distance()" [theme]="currentTheme()" [roadsData]="roadsData()"
+        [waterData]="waterData()" [parksData]="parksData()">
+      </app-poster-view>
 
-    <div class="preview-section">
-      <h3>Preview Area</h3>
-      <app-map-preview [lat]="lat" [lon]="lon" [distance]="distance"></app-map-preview>
+      <button class="close-poster-btn custom-btn icon-only" (click)="showPoster.set(false)">
+        <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <line x1="18" y1="6" x2="6" y2="18"></line>
+          <line x1="6" y1="6" x2="18" y2="18"></line>
+        </svg>
+      </button>
     </div>
-  </mat-sidenav>
 
-  <mat-sidenav-content class="content">
-    <app-poster-view [isLoading]="isLoading" [city]="city" [country]="country" [coords]="{lat: lat, lon: lon}"
-      [theme]="theme" [roadsData]="roadsData" [waterData]="waterData" [parksData]="parksData"></app-poster-view>
-  </mat-sidenav-content>
-</mat-sidenav-container>
+    <div class="poster-sidebar">
+      <div class="sidebar-header">
+        <h2>Your Art</h2>
+        <p>Ready for print</p>
+      </div>
+
+      <div class="download-section">
+        <button class="custom-btn primary full-width" (click)="downloadPoster(resolution())">
+          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+            <polyline points="7 10 12 15 17 10"></polyline>
+            <line x1="12" y1="15" x2="12" y2="3"></line>
+          </svg>
+          Download PNG
+        </button>
+
+        <div class="resolution-options">
+          <span class="res-label">Resolution:</span>
+          <div class="res-buttons">
+            <button class="res-btn" [class.active]="resolution() === 1" (click)="resolution.set(1)">1080p</button>
+            <button class="res-btn" [class.active]="resolution() === 2" (click)="resolution.set(2)">4K</button>
+            <button class="res-btn" [class.active]="resolution() === 3" (click)="resolution.set(3)">8K</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="theme-section">
+        <h3>Try other styles</h3>
+        <app-sidebar-style-selector [themes]="themes" [currentTheme]="currentThemeName()"
+          (themeSelected)="onThemeSelected($event)">
+        </app-sidebar-style-selector>
+      </div>
+    </div>
+  </div>
+  }
+
+  <!-- UI Overlays (Hidden when poster is shown) -->
+  @if (!showPoster()) {
+  <app-search-bar (locationSelected)="onLocationSelected($event)"></app-search-bar>
+
+  <app-distance-control [distance]="distance()" (distanceChange)="distance.set($event)"></app-distance-control>
+
+  <app-style-selector [themes]="themes" [currentTheme]="currentThemeName()" (themeSelected)="onThemeSelected($event)">
+  </app-style-selector>
+
+  <!-- Action Buttons -->
+  <div class="actions-container">
+    <button class="action-btn generate-btn custom-btn primary" (click)="generatePoster()" [disabled]="isLoading()">
+      @if (isLoading()) {
+      <div class="spinner"></div>
+      } @else {
+      <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path
+          d="M12 2a10 10 0 0 1 10 10c0 5.52-4.48 10-10 10S2 17.52 2 12 6.48 2 12 2zm0 18a8 8 0 1 0 0-16 8 8 0 0 0 0 16z">
+        </path>
+        <path d="M12 6v6l4 2"></path>
+      </svg>
+      <span>Generate Art</span>
+      }
+    </button>
+  </div>
+  }
+
+  <app-toast-container></app-toast-container>
+</div>

@@ -25,7 +25,7 @@ export class OverpassService {
 
     fetchRoads(bbox: string): Observable<any> {
         const query = `
-      [out:json][timeout:90];
+      [out:json][timeout:180];
       (
         way["highway"](${bbox});
       );
@@ -40,12 +40,11 @@ export class OverpassService {
 
     fetchWater(bbox: string): Observable<any> {
         const query = `
-      [out:json][timeout:90];
+      [out:json][timeout:180];
       (
         way["natural"="water"](${bbox});
         relation["natural"="water"](${bbox});
-        way["waterway"="riverbank"](${bbox});
-        relation["waterway"="riverbank"](${bbox});
+        way["waterway"](${bbox});
       );
       out body;
       >;
@@ -58,7 +57,7 @@ export class OverpassService {
 
     fetchParks(bbox: string): Observable<any> {
         const query = `
-      [out:json][timeout:90];
+      [out:json][timeout:180];
       (
         way["leisure"="park"](${bbox});
         relation["leisure"="park"](${bbox});

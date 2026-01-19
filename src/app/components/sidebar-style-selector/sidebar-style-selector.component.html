@@ -1,0 +1,17 @@
+<div class="sidebar-selector">
+    <div class="list-container">
+        @for (themeName of themes(); track themeName) {
+        <div class="theme-item" [class.active]="currentTheme() === themeName" (click)="selectTheme(themeName)">
+            <div class="preview-box">
+                @if (themeData()[themeName]) {
+                <app-theme-preview-svg [theme]="themeData()[themeName]" />
+                }
+            </div>
+            <div class="theme-info">
+                <span class="name">{{ themeName.replace('_', ' ') }}</span>
+                <span class="helper">Click to apply</span>
+            </div>
+        </div>
+        }
+    </div>
+</div>

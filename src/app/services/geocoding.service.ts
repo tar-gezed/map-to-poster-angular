@@ -23,12 +23,12 @@ export class GeocodingService {
     private http = inject(HttpClient);
     private baseUrl = 'https://nominatim.openstreetmap.org/search';
 
-    search(city: string, country: string): Observable<GeocodingResult[]> {
-        const query = `${city}, ${country}`;
+    search(query: string): Observable<GeocodingResult[]> {
         const params = {
             q: query,
             format: 'json',
-            limit: '1'
+            addressdetails: '1',
+            limit: '5'
         };
         return this.http.get<GeocodingResult[]>(this.baseUrl, { params });
     }

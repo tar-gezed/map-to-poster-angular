@@ -1,98 +1,127 @@
-import { Component, inject, ChangeDetectionStrategy } from '@angular/core';
-import { MatSidenavModule } from '@angular/material/sidenav';
-import { MatToolbarModule } from '@angular/material/toolbar';
-import { MatIconModule } from '@angular/material/icon';
-import { MatSnackBar, MatSnackBarModule } from '@angular/material/snack-bar';
-import { forkJoin, switchMap, tap, catchError, of } from 'rxjs';
+import { Component, inject, signal, effect, ChangeDetectionStrategy } from '@angular/core';
+import { CommonModule } from '@angular/common';
 
-import { PosterControlsComponent } from './components/poster-controls/poster-controls';
+import { GeocodingService, GeocodingResult } from './services/geocoding.service';
+import { ThemeService, Theme } from './services/theme.service';
+import { OverpassService } from './services/overpass.service';
+import { PosterService } from './services/poster.service';
+
 import { MapPreviewComponent } from './components/map-preview/map-preview';
 import { PosterViewComponent } from './components/poster-view/poster-view';
-import { GeocodingService } from './services/geocoding.service';
-import { OverpassService } from './services/overpass.service';
-import { ThemeService, Theme } from './services/theme.service';
-import { OsmData } from './services/poster.service';
+import { SearchBarComponent } from './components/search-bar/search-bar.component';
+import { StyleSelectorComponent } from './components/style-selector/style-selector.component';
+import { DistanceControlComponent } from './components/distance-control/distance-control.component';
+import { ToastContainerComponent, ToastService } from './components/toast/toast.component';
+import { SidebarStyleSelectorComponent } from './components/sidebar-style-selector/sidebar-style-selector.component';
+import { ViewChild } from '@angular/core'; // Ensure ViewChild is imported
+import { forkJoin, catchError, of } from 'rxjs';
 
 @Component({
   selector: 'app-root',
   imports: [
-    MatSidenavModule,
-    MatToolbarModule,
-    MatIconModule,
-    MatSnackBarModule,
-    PosterControlsComponent,
+    CommonModule,
     MapPreviewComponent,
-    PosterViewComponent
+    PosterViewComponent,
+    SearchBarComponent,
+    StyleSelectorComponent,
+    DistanceControlComponent,
+    ToastContainerComponent,
+    SidebarStyleSelectorComponent
   ],
   templateUrl: './app.html',
   styleUrl: './app.scss',
   changeDetection: ChangeDetectionStrategy.OnPush
 })
 export class AppComponent {
-  private geocoding = inject(GeocodingService);
-  private overpass = inject(OverpassService);
+  private geocodingService = inject(GeocodingService);
   private themeService = inject(ThemeService);
-  private snackBar = inject(MatSnackBar);
+  private overpassService = inject(OverpassService);
+  private toastService = inject(ToastService);
 
   // State
-  isLoading = false;
-  city = 'Paris';
-  country = 'France';
-  distance = 10000;
-  lat = 48.8566;
-  lon = 2.3522;
-  theme: Theme | null = null;
-  roadsData: OsmData | null = null;
-  waterData: OsmData | null = null;
-  parksData: OsmData | null = null;
+  lat = signal(45.1885); // Grenoble
+  lon = signal(5.7245);
+  distance = signal(10000); // Default distance 10km
 
-  async onGenerate(data: { city: string; country: string; distance: number; theme: string | Theme }) {
-    this.isLoading = true;
-    this.city = data.city;
-    this.country = data.country;
-    this.distance = data.distance;
+  city = signal('Grenoble');
+  country = signal('France');
 
-    // 1. Geocode
-    this.geocoding.search(data.city, data.country).pipe(
-      switchMap(results => {
-        if (!results || results.length === 0) {
-          throw new Error('City not found');
-        }
-        const res = results[0];
-        this.lat = parseFloat(res.lat);
-        this.lon = parseFloat(res.lon);
+  themes = this.themeService.getAvailableThemes();
+  currentThemeName = signal('midnight_blue');
+  currentTheme = signal<Theme | null>(null);
 
-        // 2. Load Theme
-        if (typeof data.theme === 'string') {
-          return this.themeService.loadTheme(data.theme);
-        } else {
-          return of(data.theme);
-        }
-      }),
-      switchMap(theme => {
-        this.theme = theme;
-        const bbox = this.overpass.getBbox(this.lat, this.lon, this.distance);
+  // Data for Poster
+  roadsData = signal<any>(null);
+  waterData = signal<any>(null);
+  parksData = signal<any>(null);
+  isLoading = signal(false);
 
-        // 3. Fetch Data in parallel
-        return forkJoin({
-          roads: this.overpass.fetchRoads(bbox),
-          water: this.overpass.fetchWater(bbox),
-          parks: this.overpass.fetchParks(bbox)
-        });
-      }),
-      tap({
-        next: (results) => {
-          this.roadsData = results.roads;
-          this.waterData = results.water;
-          this.parksData = results.parks;
-          this.isLoading = false;
-        },
-        error: (err) => {
-          console.error(err);
-          this.snackBar.open(`Error: ${err.message}`, 'Close', { duration: 5000 });
-          this.isLoading = false;
-        }
+  // UI State
+  showPoster = signal(false);
+
+  constructor() {
+    // Load initial theme
+    this.loadTheme(this.currentThemeName());
+  }
+
+  onLocationSelected(result: GeocodingResult) {
+    this.lat.set(parseFloat(result.lat));
+    this.lon.set(parseFloat(result.lon));
+
+    // Extract city/country from display_name roughly or use what we have
+    const parts = result.display_name.split(', ');
+    this.city.set(parts[0]);
+    this.country.set(parts[parts.length - 1]);
+
+    // Reset poster view when location changes
+    this.showPoster.set(false);
+  }
+
+  onThemeSelected(themeName: string) {
+    this.currentThemeName.set(themeName);
+    this.loadTheme(themeName);
+    this.toastService.show(`Theme '${themeName}' selected.`, 'info');
+  }
+
+  loadTheme(name: string) {
+    this.themeService.loadTheme(name).subscribe(theme => {
+      this.currentTheme.set(theme);
+    });
+  }
+
+  @ViewChild(PosterViewComponent) posterView?: PosterViewComponent;
+
+  generatePoster() {
+    this.isLoading.set(true);
+    this.showPoster.set(true);
+
+    const bbox = this.overpassService.getBbox(this.lat(), this.lon(), this.distance());
+
+    forkJoin({
+      roads: this.overpassService.fetchRoads(bbox),
+      water: this.overpassService.fetchWater(bbox),
+      parks: this.overpassService.fetchParks(bbox)
+    }).pipe(
+      catchError(err => {
+        console.error('Error fetching data', err);
+        this.toastService.show('Error fetching map data. Try a smaller area or different location.', 'error');
+        this.isLoading.set(false);
+        this.showPoster.set(false);
+        return of(null);
       })
-    ).subscribe();
+    ).subscribe(data => {
+      if (data) {
+        this.roadsData.set(data.roads);
+        this.waterData.set(data.water);
+        this.parksData.set(data.parks);
+      }
+      this.isLoading.set(false);
+    });
+  }
+
+  resolution = signal(2); // Default 2x (QHD ish)
+
+  downloadPoster(res: number) {
+    this.posterView?.download(res);
   }
 }

@@ -81,6 +81,7 @@ export class PosterService {
         city: string,
         country: string,
         coords: { lat: number, lon: number },
+        distance: number,
         width: number = 1200, // 1200x1600 is good for preview, export can be higher
         height: number = 1600
     ): Promise<Konva.Stage> {
@@ -125,39 +126,59 @@ export class PosterService {
         // Let's calculate bounds from data.
         const bounds = this.getBounds(allNodes);
 
-        // Mercator projection function
+        // Mercator projection function (Lat/Lon to Meters)
+        // Standard Web Mercator (EPSG:3857)
+        const R = 6378137; // Earth radius in meters
+        const MAX_LAT = 85.05112878;
+
         const project = (lat: number, lon: number) => {
-            const x = lon;
-            const y = Math.log(Math.tan(Math.PI / 4 + lat * Math.PI / 360));
+            // Clamp latitude to avoid infinity
+            const safeLat = Math.max(Math.min(lat, MAX_LAT), -MAX_LAT);
+
+            const x = R * (lon * Math.PI / 180);
+            const y = R * Math.log(Math.tan(Math.PI / 4 + (safeLat * Math.PI / 180) / 2));
             return { x, y };
         };
 
-        const minProj = project(bounds.minLat, bounds.minLon);
-        const maxProj = project(bounds.maxLat, bounds.maxLon);
+        // Project center
+        const cProj = project(coords.lat, coords.lon);
 
-        const dataWidth = maxProj.x - minProj.x;
-        const dataHeight = maxProj.y - minProj.y;
+        // Define viewport in METERS (using distance as radius)
+        const minX = cProj.x - distance;
+        const maxX = cProj.x + distance;
+        const minY = cProj.y - distance;
+        const maxY = cProj.y + distance;
 
-        // Scale to fit canvas, maintaining aspect ratio
-        const scaleX = width / dataWidth;
-        const scaleY = height / dataHeight;
-        const scale = Math.min(scaleX, scaleY) * 0.9; // 90% fill
+        const dataWidth = maxX - minX;
+        const dataHeight = maxY - minY;
 
-        // Center
+        // We will use minX/minY as our "minProj" for offset calculation
+        const minProj = { x: minX, y: minY };
+
+        // Scale to fit canvas
+        // Canvas is 1200x1600 (Portrait)
+        // Data is Square
+        // We want to FIT WIDTH (filling the width of the poster)
+        const scale = width / dataWidth;
+
+        // Center vertically in the canvas
+        // The data height in canvas pixels:
+        const renderedHeight = dataHeight * scale;
         const offsetX = (width - dataWidth * scale) / 2;
-        const offsetY = (height - dataHeight * scale) / 2;
+        const offsetY = (height - renderedHeight) / 2;
 
         const toCanvas = (lat: number, lon: number) => {
             const proj = project(lat, lon);
-            // Flip Y because canvas Y is down
+            // Flip Y because canvas Y is down (screen coordinates)
+            // But Mercator Y increases upwards (North).
             return {
                 x: (proj.x - minProj.x) * scale + offsetX,
                 y: height - ((proj.y - minProj.y) * scale + offsetY)
             };
         };
 
-        // Helper to draw ways
-        const drawWays = (data: OsmData, type: 'water' | 'park' | 'road') => {
+        // Helper to draw ways (Async to prevent UI freeze)
+        const drawWays = async (data: OsmData, type: 'water' | 'park' | 'road') => {
             const nodeMap = this.createNodeMap(data.elements);
 
             // Sort roads by hierarchy if road
@@ -168,15 +189,18 @@ export class PosterService {
                 ways.sort((a, b) => {
                     const hA = a.tags?.['highway'] || '';
                     const hB = b.tags?.['highway'] || '';
-                    return hierarchy.indexOf(hA) - hierarchy.indexOf(hB); // Draw lower hierarchy first? No, draw important ones last (on top)?
-                    // Actually, draw important ones on top usually, but thickness handles visibility.
-                    // Let's draw in reverse order of importance so big roads are on top?
-                    // Or big roads at bottom?
-                    // Usually big roads are drawn last (on top).
+                    return hierarchy.indexOf(hA) - hierarchy.indexOf(hB);
                 });
             }
 
-            for (const way of ways) {
+            // Chunk rendering
+            const BATCH_SIZE = 50;
+            for (let i = 0; i < ways.length; i++) {
+                if (i % BATCH_SIZE === 0) {
+                    await new Promise(resolve => setTimeout(resolve, 0));
+                }
+
+                const way = ways[i];
                 if (!way.nodes) continue;
 
                 const points: number[] = [];
@@ -213,7 +237,7 @@ export class PosterService {
 
                     if (['motorway', 'motorway_link'].includes(highway)) {
                         color = theme.road_motorway;
-                        width = 3; // Scale width?
+                        width = 3;
                     } else if (['trunk', 'trunk_link', 'primary', 'primary_link'].includes(highway)) {
                         color = theme.road_primary;
                         width = 2.5;
@@ -240,10 +264,10 @@ export class PosterService {
             }
         };
 
-        // Draw Layers in order
-        drawWays(waterData, 'water');
-        drawWays(parksData, 'park');
-        drawWays(roadsData, 'road');
+        // Draw Layers in order (Sequential await to keep UI responsive)
+        await drawWays(waterData, 'water');
+        await drawWays(parksData, 'park');
+        await drawWays(roadsData, 'road');
 
         // Gradient Fade
         // Top
@@ -272,9 +296,11 @@ export class PosterService {
 
         // Text
         // City
+        // Adjust Y to account for text height (Konva draws from top-left)
+        // We want the baseline around 0.86, so subtract font height roughly
         const cityText = new Konva.Text({
             x: width / 2,
-            y: height * 0.86,
+            y: height * 0.86 - 50,
             text: city.toUpperCase().split('').join('  '),
             fontSize: 60,
             fontFamily: 'Roboto',
@@ -288,7 +314,7 @@ export class PosterService {
         // Country
         const countryText = new Konva.Text({
             x: width / 2,
-            y: height * 0.90,
+            y: height * 0.90, // Keep this, or adjust if needed
             text: country.toUpperCase(),
             fontSize: 22,
             fontFamily: 'Roboto',
@@ -316,14 +342,7 @@ export class PosterService {
         layer.add(coordText);
 
         // Separator Line
-        const lineY = height * 0.875; // Between city and country? Python code: 0.125 from bottom.
-        // Python: 
-        // City: 0.14 (from bottom) -> 0.86 from top
-        // Country: 0.10 -> 0.90
-        // Coords: 0.07 -> 0.93
-        // Line: 0.125 -> 0.875
-        // X: 0.4 to 0.6
-
+        // Ensure this is below City and above Country
         const sepLine = new Konva.Line({
             points: [width * 0.4, height * 0.88, width * 0.6, height * 0.88],
             stroke: theme.text,
