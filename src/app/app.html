@@ -85,5 +85,15 @@
   </div>
   }
 
+  <!-- Loading Overlay for Overpass API calls -->
+  @if (isLoading() && !showPoster()) {
+  <div class="loading-overlay">
+    <div class="loading-content">
+      <div class="big-spinner"></div>
+      <p>Fetching Map Data...</p>
+    </div>
+  </div>
+  }
+
   <app-toast-container></app-toast-container>
 </div>

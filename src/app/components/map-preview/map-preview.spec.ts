@@ -1,18 +1,18 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 
-import { MapPreview } from './map-preview';
+import { MapPreviewComponent } from './map-preview';
 
-describe('MapPreview', () => {
-  let component: MapPreview;
-  let fixture: ComponentFixture<MapPreview>;
+describe('MapPreviewComponent', () => {
+  let component: MapPreviewComponent;
+  let fixture: ComponentFixture<MapPreviewComponent>;
 
   beforeEach(async () => {
     await TestBed.configureTestingModule({
-      imports: [MapPreview]
+      imports: [MapPreviewComponent]
     })
     .compileComponents();
 
-    fixture = TestBed.createComponent(MapPreview);
+    fixture = TestBed.createComponent(MapPreviewComponent);
     component = fixture.componentInstance;
     await fixture.whenStable();
   });

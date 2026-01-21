@@ -14,6 +14,7 @@ import { DistanceControlComponent } from './components/distance-control/distance
 import { ToastContainerComponent, ToastService } from './components/toast/toast.component';
 import { SidebarStyleSelectorComponent } from './components/sidebar-style-selector/sidebar-style-selector.component';
 import { ViewChild } from '@angular/core'; // Ensure ViewChild is imported
+import { HttpErrorResponse } from '@angular/common/http';
 import { forkJoin, catchError, of } from 'rxjs';
 
 @Component({
@@ -110,8 +111,8 @@ export class AppComponent {
       this.toastService.show('⚠️ Large area selected. This may take a while and use significant memory.', 'info');
     }
 
+    this.showPoster.set(false);
     this.isLoading.set(true);
-    this.showPoster.set(true);
 
     // Poster is 3:4 aspect ratio (Portrait)
     // distance() is the horizontal radius. Vertical radius should be larger.
@@ -126,11 +127,18 @@ export class AppComponent {
       water: this.overpassService.fetchWater(bbox),
       parks: this.overpassService.fetchParks(bbox)
     }).pipe(
-      catchError(err => {
+      catchError((err: HttpErrorResponse) => {
         console.error('Error fetching data', err);
-        this.toastService.show('Error fetching map data. Try a smaller area or different location.', 'error');
+
+        let message = 'Error fetching map data. Try a smaller area or different location.';
+        if (err.status === 504) {
+          message = 'Server is unreachable (504). Please try again later.';
+        } else if (err.status === 429) {
+          message = 'Too many requests (429). Please wait a bit.';
+        }
+
+        this.toastService.show(message, 'error');
         this.isLoading.set(false);
-        this.showPoster.set(false);
         return of(null);
       })
     ).subscribe(data => {
@@ -138,6 +146,7 @@ export class AppComponent {
         this.roadsData.set(data.roads);
         this.waterData.set(data.water);
         this.parksData.set(data.parks);
+        this.showPoster.set(true);
       }
       this.isLoading.set(false);
     });
