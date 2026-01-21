@@ -1,6 +1,6 @@
 import { Injectable, inject } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
-import { Observable, map } from 'rxjs';
+import { Observable, map, forkJoin } from 'rxjs';
 import {
   OverpassGeomResponse,
   OverpassGeomElement,
@@ -153,70 +153,119 @@ export class OverpassService {
   }
 
   // ============================================
-  // Legacy methods - kept for backward compatibility
-  // @deprecated Use fetchAllMapData() instead
+  // Parallel Query Methods for Large Areas (>15km)
+  // Uses 3 separate requests to distribute server load
   // ============================================
 
   /**
-   * @deprecated Use fetchAllMapData() instead for better performance
+   * Smart fetcher that auto-selects strategy based on area size.
+   * - Areas <= 15km: Single unified query (lower latency)
+   * - Areas > 15km: 3 parallel queries (reduces timeout risk)
    */
-  fetchRoads(bbox: string, excludeMinorRoads: boolean = false): Observable<OverpassResponse> {
-    const highwayFilter = excludeMinorRoads
-      ? 'way["highway"]["highway"!~"footway|path|cycleway|steps|pedestrian|track|service"](${bbox});'
-      : 'way["highway"](${bbox});';
-
-    const query = `
-      [out:json][timeout:180];
-      (
-        ${highwayFilter.replace('${bbox}', bbox)}
-      );
-      out body;
-      >;
-      out skel qt;
-    `;
-    return this.http.post<OverpassResponse>(this.baseUrl, `data=${encodeURIComponent(query)}`, {
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
-    });
+  fetchMapDataSmart(
+    bbox: string,
+    excludeMinorRoads: boolean,
+    distanceMeters: number
+  ): Observable<CategorizedMapData> {
+    if (distanceMeters > 15000) {
+      console.log('[Overpass] Large area detected, using parallel queries');
+      return this.fetchMapDataParallel(bbox, excludeMinorRoads, distanceMeters);
+    } else {
+      console.log('[Overpass] Normal area, using unified query');
+      return this.fetchAllMapData(bbox, excludeMinorRoads, distanceMeters);
+    }
   }
 
   /**
-   * @deprecated Use fetchAllMapData() instead for better performance
+   * Fetch map data using 3 parallel requests.
+   * Better for large areas to reduce timeout risk by distributing server load.
    */
-  fetchWater(bbox: string): Observable<OverpassResponse> {
-    const query = `
-      [out:json][timeout:180];
-      (
-        way["natural"="water"](${bbox});
-        relation["natural"="water"](${bbox});
-        way["waterway"](${bbox});
-      );
-      out body;
-      >;
-      out skel qt;
-    `;
-    return this.http.post<OverpassResponse>(this.baseUrl, `data=${encodeURIComponent(query)}`, {
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
-    });
-  }
+  private fetchMapDataParallel(
+    bbox: string,
+    excludeMinorRoads: boolean,
+    distanceMeters: number
+  ): Observable<CategorizedMapData> {
+    const timeout = this.getTimeout(distanceMeters);
+    const highwayFilter = this.getHighwayFilter(excludeMinorRoads);
 
-  /**
-   * @deprecated Use fetchAllMapData() instead for better performance
-   */
-  fetchParks(bbox: string): Observable<OverpassResponse> {
-    const query = `
-      [out:json][timeout:180];
-      (
-        way["leisure"="park"](${bbox});
-        relation["leisure"="park"](${bbox});
-        way["landuse"="grass"](${bbox});
-        relation["landuse"="grass"](${bbox});
-      );
-      out body;
-      >;
-      out skel qt;
+    // Roads query (heaviest - many small segments)
+    const roadsQuery = `
+      [out:json][timeout:${timeout}][bbox:${bbox}];
+      way["highway"~"^(${highwayFilter})(_link)?$"];
+      out body geom(${bbox}) qt;
     `;
-    return this.http.post<OverpassResponse>(this.baseUrl, `data=${encodeURIComponent(query)}`, {
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
-    });
+
+    // Water query (complex geometries)
+    const waterQuery = `
+      [out:json][timeout:${timeout}][bbox:${bbox}];
+      (
+        way["natural"="water"];
+        relation["natural"="water"];
+        way["waterway"];
+      );
+      out body geom(${bbox}) qt;
+    `;
+
+    // Parks query (complex geometries)
+    const parksQuery = `
+      [out:json][timeout:${timeout}][bbox:${bbox}];
+      (
+        way["leisure"="park"];
+        relation["leisure"="park"];
+        way["landuse"~"^(grass|forest|meadow)$"];
+        relation["landuse"~"^(grass|forest|meadow)$"];
+      );
+      out body geom(${bbox}) qt;
+    `;
+
+    const headers = { 'Content-Type': 'application/x-www-form-urlencoded' };
+
+    return forkJoin({
+      roads: this.http.post<OverpassGeomResponse>(
+        this.baseUrl,
+        `data=${encodeURIComponent(roadsQuery)}`,
+        { headers }
+      ),
+      water: this.http.post<OverpassGeomResponse>(
+        this.baseUrl,
+        `data=${encodeURIComponent(waterQuery)}`,
+        { headers }
+      ),
+      parks: this.http.post<OverpassGeomResponse>(
+        this.baseUrl,
+        `data=${encodeURIComponent(parksQuery)}`,
+        { headers }
+      )
+    }).pipe(
+      map(results => {
+        // Combine results from parallel queries
+        const roads: OverpassGeomWay[] = [];
+        const water: OverpassGeomElement[] = [];
+        const parks: OverpassGeomElement[] = [];
+
+        // Process roads (all are ways with highway tag)
+        for (const el of results.roads.elements) {
+          if (el.type === 'way' && el.tags?.['highway']) {
+            roads.push(el as OverpassGeomWay);
+          }
+        }
+
+        // Process water
+        for (const el of results.water.elements) {
+          if (el.tags) {
+            water.push(el);
+          }
+        }
+
+        // Process parks
+        for (const el of results.parks.elements) {
+          if (el.tags) {
+            parks.push(el);
+          }
+        }
+
+        return { roads, water, parks };
+      })
+    );
   }
 }

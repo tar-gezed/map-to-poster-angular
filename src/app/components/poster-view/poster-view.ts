@@ -30,6 +30,7 @@ export class PosterViewComponent implements AfterViewInit, OnDestroy {
   loadingProgress = signal<number>(0);
   loadingMessage = signal<string>('Generating...');
   viewReady = signal(false);
+  isExporting = signal(false); // For export loading indicator
 
   private resizeObserver?: ResizeObserver;
 
@@ -161,18 +162,37 @@ export class PosterViewComponent implements AfterViewInit, OnDestroy {
     }
   }
 
+  /**
+   * Async download using toBlob() instead of toDataURL().
+   * toBlob is async and non-blocking, preventing UI freeze on large exports.
+   */
   download(ratio: number = 2) {
     const currentStage = this.stage();
-    if (currentStage) {
-      const pixelRatio = ratio; // 1 = 1200x1600 (HD/1080p-ish), 2 = 2400x3200 (QHD/4k-ish), 3 = 4k+
-      const dataURL = currentStage.toDataURL({ pixelRatio: pixelRatio });
-      const link = document.createElement('a');
-      const resLabel = pixelRatio === 1 ? 'HD' : pixelRatio === 2 ? 'QHD' : '4K';
-      link.download = `${this.city()}_${this.theme()?.name || 'style'}_${resLabel}.png`;
-      link.href = dataURL;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-    }
+    if (!currentStage || this.isExporting()) return;
+
+    this.isExporting.set(true);
+    const resLabel = ratio === 1 ? 'HD' : ratio === 2 ? 'QHD' : '4K';
+    const filename = `${this.city()}_${this.theme()?.name || 'style'}_${resLabel}.png`;
+
+    // Get the canvas from Konva stage
+    const canvas = currentStage.toCanvas({ pixelRatio: ratio }) as HTMLCanvasElement;
+
+    // Use toBlob for async, non-blocking export
+    canvas.toBlob((blob) => {
+      if (blob) {
+        // Create object URL for efficient download (no base64 overhead)
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.download = filename;
+        link.href = url;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+
+        // Clean up object URL after download
+        URL.revokeObjectURL(url);
+      }
+      this.isExporting.set(false);
+    }, 'image/png');
   }
 }
