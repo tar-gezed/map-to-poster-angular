@@ -1,18 +1,25 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 
-import { PosterView } from './poster-view';
+import { PosterViewComponent } from './poster-view';
 
-describe('PosterView', () => {
-  let component: PosterView;
-  let fixture: ComponentFixture<PosterView>;
+describe('PosterViewComponent', () => {
+  let component: PosterViewComponent;
+  let fixture: ComponentFixture<PosterViewComponent>;
 
   beforeEach(async () => {
+    // Mock ResizeObserver
+    (window as any).ResizeObserver = class {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    };
+
     await TestBed.configureTestingModule({
-      imports: [PosterView]
+      imports: [PosterViewComponent]
     })
     .compileComponents();
 
-    fixture = TestBed.createComponent(PosterView);
+    fixture = TestBed.createComponent(PosterViewComponent);
     component = fixture.componentInstance;
     await fixture.whenStable();
   });
