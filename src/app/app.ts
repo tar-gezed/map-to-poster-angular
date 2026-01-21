@@ -1,10 +1,10 @@
-import { Component, inject, signal, effect, ChangeDetectionStrategy } from '@angular/core';
+import { Component, inject, signal, ChangeDetectionStrategy, ViewChild } from '@angular/core';
 import { CommonModule } from '@angular/common';
 
 import { GeocodingService, GeocodingResult } from './services/geocoding.service';
 import { ThemeService, Theme } from './services/theme.service';
 import { OverpassService } from './services/overpass.service';
-import { PosterService } from './services/poster.service';
+import { CategorizedMapData } from './services/overpass.types';
 
 import { MapPreviewComponent } from './components/map-preview/map-preview';
 import { PosterViewComponent } from './components/poster-view/poster-view';
@@ -13,9 +13,8 @@ import { StyleSelectorComponent } from './components/style-selector/style-select
 import { DistanceControlComponent } from './components/distance-control/distance-control.component';
 import { ToastContainerComponent, ToastService } from './components/toast/toast.component';
 import { SidebarStyleSelectorComponent } from './components/sidebar-style-selector/sidebar-style-selector.component';
-import { ViewChild } from '@angular/core'; // Ensure ViewChild is imported
 import { HttpErrorResponse } from '@angular/common/http';
-import { forkJoin, catchError, of } from 'rxjs';
+import { catchError, of } from 'rxjs';
 
 @Component({
   selector: 'app-root',
@@ -51,10 +50,8 @@ export class AppComponent {
   currentThemeName = signal('midnight_blue');
   currentTheme = signal<Theme | null>(null);
 
-  // Data for Poster
-  roadsData = signal<any>(null);
-  waterData = signal<any>(null);
-  parksData = signal<any>(null);
+  // Data for Poster - now using CategorizedMapData structure
+  mapData = signal<CategorizedMapData | null>(null);
   isLoading = signal(false);
 
   // UI State
@@ -100,9 +97,7 @@ export class AppComponent {
     this.showPoster.set(false);
 
     // Release OSM data from memory - critical for large areas
-    this.roadsData.set(null);
-    this.waterData.set(null);
-    this.parksData.set(null);
+    this.mapData.set(null);
   }
 
   generatePoster() {
@@ -122,19 +117,19 @@ export class AppComponent {
     // For large areas (>10km), exclude minor roads to reduce data and memory usage
     const excludeMinorRoads = this.distance() > 10000;
 
-    forkJoin({
-      roads: this.overpassService.fetchRoads(bbox, excludeMinorRoads),
-      water: this.overpassService.fetchWater(bbox),
-      parks: this.overpassService.fetchParks(bbox)
-    }).pipe(
+    // Single optimized API call - fetches roads, water, parks in one request
+    // Uses `out geom qt` for inline geometry and faster processing
+    this.overpassService.fetchAllMapData(bbox, excludeMinorRoads, this.distance()).pipe(
       catchError((err: HttpErrorResponse) => {
         console.error('Error fetching data', err);
 
         let message = 'Error fetching map data. Try a smaller area or different location.';
         if (err.status === 504) {
-          message = 'Server is unreachable (504). Please try again later.';
+          message = 'Server timeout (504). Try a smaller area.';
         } else if (err.status === 429) {
           message = 'Too many requests (429). Please wait a bit.';
+        } else if (err.status === 400) {
+          message = 'Bad request (400). The area may be too large.';
         }
 
         this.toastService.show(message, 'error');
@@ -143,9 +138,7 @@ export class AppComponent {
       })
     ).subscribe(data => {
       if (data) {
-        this.roadsData.set(data.roads);
-        this.waterData.set(data.water);
-        this.parksData.set(data.parks);
+        this.mapData.set(data);
         this.showPoster.set(true);
       }
       this.isLoading.set(false);
