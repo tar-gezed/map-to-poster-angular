@@ -118,12 +118,17 @@ export class OverpassService {
   }
 
   /**
-   * Categorize Overpass elements into roads, water, parks.
+   * Categorize Overpass elements into roads, waterAreas, waterways, parks.
    * With `out geom`, geometry is inline - no node map needed!
+   * 
+   * Water is split:
+   * - waterAreas: natural=water (lakes, basins) - filled polygons
+   * - waterways: waterway=* (rivers, streams) - stroked lines
    */
   private categorizeElements(elements: OverpassGeomElement[]): CategorizedMapData {
     const roads: OverpassGeomWay[] = [];
-    const water: OverpassGeomElement[] = [];
+    const waterAreas: OverpassGeomElement[] = [];
+    const waterways: OverpassGeomWay[] = [];
     const parks: OverpassGeomElement[] = [];
 
     for (const el of elements) {
@@ -136,9 +141,16 @@ export class OverpassService {
         continue;
       }
 
-      // Check for water (natural=water or waterway)
-      if (tags['natural'] === 'water' || tags['waterway']) {
-        water.push(el);
+      // Water areas (lakes, basins) - rendered as filled polygons
+      if (tags['natural'] === 'water') {
+        waterAreas.push(el);
+        continue;
+      }
+
+      // Waterways (rivers, streams) - rendered as stroked lines
+      // Only ways can be waterways (relations with waterway are rare edge cases)
+      if (el.type === 'way' && tags['waterway']) {
+        waterways.push(el);
         continue;
       }
 
@@ -149,7 +161,7 @@ export class OverpassService {
       }
     }
 
-    return { roads, water, parks };
+    return { roads, waterAreas, waterways, parks };
   }
 
   // ============================================
@@ -240,7 +252,8 @@ export class OverpassService {
       map(results => {
         // Combine results from parallel queries
         const roads: OverpassGeomWay[] = [];
-        const water: OverpassGeomElement[] = [];
+        const waterAreas: OverpassGeomElement[] = [];
+        const waterways: OverpassGeomWay[] = [];
         const parks: OverpassGeomElement[] = [];
 
         // Process roads (all are ways with highway tag)
@@ -250,10 +263,17 @@ export class OverpassService {
           }
         }
 
-        // Process water
+        // Process water - split into areas and ways
         for (const el of results.water.elements) {
-          if (el.tags) {
-            water.push(el);
+          if (!el.tags) continue;
+
+          // Water areas (lakes, basins) - filled polygons
+          if (el.tags['natural'] === 'water') {
+            waterAreas.push(el);
+          }
+          // Waterways (rivers, streams) - stroked lines
+          else if (el.type === 'way' && el.tags['waterway']) {
+            waterways.push(el as OverpassGeomWay);
           }
         }
 
@@ -264,7 +284,7 @@ export class OverpassService {
           }
         }
 
-        return { roads, water, parks };
+        return { roads, waterAreas, waterways, parks };
       })
     );
   }

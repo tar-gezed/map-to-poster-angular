@@ -279,17 +279,111 @@ export class PosterService {
             }
         };
 
+        // Draw waterways (rivers, streams) as stroked lines
+        // Similar to roads but with water color
+        const drawWaterways = async (
+            waterways: OverpassGeomWay[],
+            color: string,
+            startProgress: number,
+            endProgress: number
+        ) => {
+            const paths: number[][] = [];
+            const CHUNK_SIZE = 500;
+
+            for (let i = 0; i < waterways.length; i++) {
+                if (i % CHUNK_SIZE === 0) {
+                    const currentProgress = startProgress + ((i / waterways.length) * (endProgress - startProgress));
+                    if (onProgress) onProgress(`Processing waterways...`, Math.round(currentProgress));
+                    await new Promise(resolve => setTimeout(resolve, 0));
+                }
+
+                const way = waterways[i];
+                if (!way.geometry || way.geometry.length < 2) continue;
+
+                const points = extractPoints(way.geometry);
+                if (points.length >= 4) {
+                    paths.push(points);
+                }
+            }
+
+            if (paths.length === 0) return;
+
+            // Determine stroke width based on waterway type
+            // Major rivers get thicker lines
+            const getWaterwayWidth = (tags: Record<string, string> | undefined): number => {
+                const type = tags?.['waterway'] || '';
+                if (type === 'river') return 3;
+                if (type === 'canal') return 2.5;
+                if (type === 'stream') return 1.5;
+                return 1; // ditch, drain, etc.
+            };
+
+            // Group by width for efficient batching
+            const widthGroups = new Map<number, number[][]>();
+            for (let i = 0; i < waterways.length; i++) {
+                const way = waterways[i];
+                if (!way.geometry || way.geometry.length < 2) continue;
+                const points = extractPoints(way.geometry);
+                if (points.length < 4) continue;
+
+                const strokeWidth = getWaterwayWidth(way.tags);
+                if (!widthGroups.has(strokeWidth)) {
+                    widthGroups.set(strokeWidth, []);
+                }
+                widthGroups.get(strokeWidth)!.push(points);
+            }
+
+            const MAX_PATHS_PER_SHAPE = 2000;
+
+            // Draw from thinnest to thickest (larger rivers on top)
+            const sortedWidths = Array.from(widthGroups.keys()).sort((a, b) => a - b);
+
+            for (const strokeWidth of sortedWidths) {
+                const allPaths = widthGroups.get(strokeWidth)!;
+
+                for (let i = 0; i < allPaths.length; i += MAX_PATHS_PER_SHAPE) {
+                    const batchPaths = allPaths.slice(i, i + MAX_PATHS_PER_SHAPE);
+
+                    const shape = new Konva.Shape({
+                        stroke: color,
+                        strokeWidth: strokeWidth,
+                        lineCap: 'round',
+                        lineJoin: 'round',
+                        listening: false,
+                        sceneFunc: function (context, shape) {
+                            context.beginPath();
+                            for (const path of batchPaths) {
+                                context.moveTo(path[0], path[1]);
+                                for (let k = 2; k < path.length; k += 2) {
+                                    context.lineTo(path[k], path[k + 1]);
+                                }
+                            }
+                            context.fillStrokeShape(shape);
+                        }
+                    });
+                    layer.add(shape);
+                }
+            }
+        };
+
         // Draw Layers in order
         (async () => {
             try {
-                if (onProgress) onProgress('Water', 10);
-                await drawPolygons(mapData.water, theme.water, 0, 20, 'water');
+                // 1. Water areas (lakes, basins) - filled polygons
+                if (onProgress) onProgress('Water areas', 5);
+                await drawPolygons(mapData.waterAreas, theme.water, 0, 15, 'water areas');
 
-                if (onProgress) onProgress('Parks', 20);
-                await drawPolygons(mapData.parks, theme.parks, 20, 40, 'parks');
+                // 2. Parks and green spaces
+                if (onProgress) onProgress('Parks', 15);
+                await drawPolygons(mapData.parks, theme.parks, 15, 30, 'parks');
 
-                if (onProgress) onProgress('Roads', 40);
-                await drawRoads(mapData.roads, 40, 90);
+                // 3. Waterways (rivers, streams) - stroked lines
+                if (onProgress) onProgress('Waterways', 30);
+                await drawWaterways(mapData.waterways, theme.water, 30, 45);
+
+                // 4. Roads (on top of everything)
+                if (onProgress) onProgress('Roads', 45);
+                await drawRoads(mapData.roads, 45, 90);
 
                 if (onProgress) onProgress('Finalizing', 95);
                 await new Promise(resolve => setTimeout(resolve, 0));
