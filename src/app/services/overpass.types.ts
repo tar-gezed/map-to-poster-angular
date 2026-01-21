@@ -54,10 +54,15 @@ export interface OverpassGeomResponse {
 /**
  * Categorized map data after parsing Overpass response.
  * With `out geom`, geometry is inline - no node map needed!
+ * 
+ * Water is split into two categories:
+ * - waterAreas: Lakes, basins (natural=water) - rendered as filled polygons
+ * - waterways: Rivers, streams (waterway=*) - rendered as stroked lines
  */
 export interface CategorizedMapData {
     roads: OverpassGeomWay[];
-    water: OverpassGeomElement[];
+    waterAreas: OverpassGeomElement[];  // natural=water (lakes, basins)
+    waterways: OverpassGeomWay[];       // waterway=* (rivers, streams) - only ways
     parks: OverpassGeomElement[];
 }
 
