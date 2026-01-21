@@ -10,8 +10,7 @@
   <div class="poster-layer">
     <div class="poster-preview-area">
       <app-poster-view [isLoading]="isLoading()" [city]="city()" [country]="country()"
-        [coords]="{lat: lat(), lon: lon()}" [distance]="distance()" [theme]="currentTheme()" [roadsData]="roadsData()"
-        [waterData]="waterData()" [parksData]="parksData()">
+        [coords]="{lat: lat(), lon: lon()}" [distance]="distance()" [theme]="currentTheme()" [mapData]="mapData()">
       </app-poster-view>
 
       <button class="close-poster-btn custom-btn icon-only" (click)="closePoster()">

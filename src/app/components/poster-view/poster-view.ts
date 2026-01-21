@@ -1,7 +1,8 @@
 import { Component, ElementRef, input, effect, ViewChild, inject, ChangeDetectionStrategy, signal, untracked, AfterViewInit, OnDestroy } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { PosterService, OsmData } from '../../services/poster.service';
+import { PosterService } from '../../services/poster.service';
 import { Theme } from '../../services/theme.service';
+import { CategorizedMapData } from '../../services/overpass.types';
 import Konva from 'konva';
 
 @Component({
@@ -12,9 +13,8 @@ import Konva from 'konva';
   changeDetection: ChangeDetectionStrategy.OnPush
 })
 export class PosterViewComponent implements AfterViewInit, OnDestroy {
-  roadsData = input<OsmData | null>(null);
-  waterData = input<OsmData | null>(null);
-  parksData = input<OsmData | null>(null);
+  // Single mapData input replaces roadsData, waterData, parksData
+  mapData = input<CategorizedMapData | null>(null);
   theme = input<Theme | null>(null);
   city = input<string>('');
   country = input<string>('');
@@ -35,16 +35,14 @@ export class PosterViewComponent implements AfterViewInit, OnDestroy {
 
   constructor() {
     effect(async () => {
-      const roads = this.roadsData();
-      const water = this.waterData();
-      const parks = this.parksData();
+      const data = this.mapData();
       const theme = this.theme();
       const coords = this.coords();
       const distance = this.distance();
       const loading = this.isLoading();
       const viewReady = this.viewReady();
 
-      if (roads && water && parks && theme && coords && !loading && viewReady && this.posterContainer) {
+      if (data && theme && coords && !loading && viewReady && this.posterContainer) {
         // Clear previous
         const currentStage = untracked(() => this.stage());
         if (currentStage) {
@@ -59,9 +57,7 @@ export class PosterViewComponent implements AfterViewInit, OnDestroy {
         try {
           const newStage = await this.posterService.generatePoster(
             this.posterContainer.nativeElement.id,
-            roads,
-            water,
-            parks,
+            data,
             theme,
             this.city(),
             this.country(),
@@ -92,7 +88,7 @@ export class PosterViewComponent implements AfterViewInit, OnDestroy {
         } catch (error) {
           console.error("Poster Generation Error:", error);
           this.loadingMessage.set('Error generating poster');
-          this.loadingProgress.set(0); // Optional: keep progress bar or reset
+          this.loadingProgress.set(0);
         }
       }
     });
