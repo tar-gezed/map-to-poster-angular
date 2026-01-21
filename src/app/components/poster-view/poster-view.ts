@@ -29,6 +29,7 @@ export class PosterViewComponent implements AfterViewInit, OnDestroy {
   stage = signal<Konva.Stage | null>(null);
   loadingProgress = signal<number>(0);
   loadingMessage = signal<string>('Generating...');
+  viewReady = signal(false);
 
   private resizeObserver?: ResizeObserver;
 
@@ -41,8 +42,9 @@ export class PosterViewComponent implements AfterViewInit, OnDestroy {
       const coords = this.coords();
       const distance = this.distance();
       const loading = this.isLoading();
+      const viewReady = this.viewReady();
 
-      if (roads && water && parks && theme && coords && !loading && this.posterContainer) {
+      if (roads && water && parks && theme && coords && !loading && viewReady && this.posterContainer) {
         // Clear previous
         const currentStage = untracked(() => this.stage());
         if (currentStage) {
@@ -97,6 +99,8 @@ export class PosterViewComponent implements AfterViewInit, OnDestroy {
   }
 
   ngAfterViewInit() {
+    this.viewReady.set(true);
+
     if (this.posterWrapper) {
       this.resizeObserver = new ResizeObserver(() => {
         this.updateScale();
