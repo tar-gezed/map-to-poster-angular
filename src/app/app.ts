@@ -117,9 +117,10 @@ export class AppComponent {
     // For large areas (>10km), exclude minor roads to reduce data and memory usage
     const excludeMinorRoads = this.distance() > 10000;
 
-    // Single optimized API call - fetches roads, water, parks in one request
-    // Uses `out geom qt` for inline geometry and faster processing
-    this.overpassService.fetchAllMapData(bbox, excludeMinorRoads, this.distance()).pipe(
+    // Smart API call - auto-selects between unified or parallel queries
+    // <= 15km: unified query (lower latency)
+    // > 15km: parallel queries (reduces timeout risk)
+    this.overpassService.fetchMapDataSmart(bbox, excludeMinorRoads, this.distance()).pipe(
       catchError((err: HttpErrorResponse) => {
         console.error('Error fetching data', err);
 
