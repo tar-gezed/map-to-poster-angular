@@ -3,10 +3,10 @@ import { CommonModule } from '@angular/common';
 import { Theme } from '../../services/theme.service';
 
 @Component({
-    selector: 'app-theme-preview-svg',
-    standalone: true,
-    imports: [CommonModule],
-    template: `
+  selector: 'app-theme-preview-svg',
+  standalone: true,
+  imports: [CommonModule],
+  template: `
     @if (theme(); as t) {
       <svg viewBox="0 0 100 140" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid slice" class="preview-svg">
         <!-- Background -->
@@ -40,8 +40,8 @@ import { Theme } from '../../services/theme.service';
         <path d="M-5,100 C30,95 60,105 105,90" [attr.stroke]="t.road_motorway" stroke-width="3" fill="none" />
         
         <!-- Text Element -->
-         <text x="50" y="125" [attr.fill]="t.text" font-family="sans-serif" font-size="8" font-weight="bold" text-anchor="middle" letter-spacing="1">MAP</text>
-         <text x="50" y="133" [attr.fill]="t.text" font-family="sans-serif" font-size="4" font-weight="normal" text-anchor="middle" letter-spacing="0.5" opacity="0.7">PREVIEW</text>
+         <text x="50" y="125" [attr.fill]="t.text" font-family="Roboto, sans-serif" font-size="8" font-weight="bold" text-anchor="middle" letter-spacing="1">MAP</text>
+         <text x="50" y="133" [attr.fill]="t.text" font-family="Roboto, sans-serif" font-size="4" font-weight="normal" text-anchor="middle" letter-spacing="0.5" opacity="0.7">PREVIEW</text>
 
          <!-- Border/Frame simulation if needed, but styling handles border -->
       </svg>
@@ -49,7 +49,7 @@ import { Theme } from '../../services/theme.service';
       <div class="skeleton"></div>
     }
   `,
-    styles: [`
+  styles: [`
     :host {
       display: block;
       width: 100%;
@@ -74,5 +74,5 @@ import { Theme } from '../../services/theme.service';
   `]
 })
 export class ThemePreviewSvgComponent {
-    theme = input<Theme | undefined | null>(null);
+  theme = input<Theme | undefined | null>(null);
 }

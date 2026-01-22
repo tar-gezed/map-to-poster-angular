@@ -27,6 +27,13 @@ export class PosterService {
         height: number = 1600
     ): Promise<Konva.Stage> {
 
+        // Preload fonts before canvas rendering
+        // Canvas text rendering requires fonts to be fully loaded first
+        await Promise.all([
+            document.fonts.load('400 16px Roboto'),
+            document.fonts.load('700 16px Roboto')
+        ]);
+
         const stage = new Konva.Stage({
             container: containerId,
             width: width,
